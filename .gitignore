@@ -2,8 +2,14 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,python,terraform,linux,windows
 
 
-### Custom ###
+### Project specific ###
 secrets/
+bootstrap/
+lambda_payload.zip
+scripts/*
+!scripts/lambda.py
+!scripts/requirements.txt
+
 ### Linux ###
 *~
 
