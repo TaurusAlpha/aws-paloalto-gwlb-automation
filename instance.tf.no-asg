@@ -17,7 +17,7 @@ resource "aws_network_interface" "fw-mgmt-eni" {
 
 resource "aws_network_interface" "fw-data-eni" {
   for_each          = toset(var.availability_zones)
-  subnet_id         = var.sec_data_subnet_ids_map[each.key]
+  subnet_id         = var.data_subnet_map[each.key]
   security_groups   = [aws_security_group.fw_data_sg.id]
   source_dest_check = "false"
   tags = {
@@ -119,7 +119,7 @@ resource "aws_iam_instance_profile" "iam-instance-profile" {
 
 resource "aws_instance" "firewall_instance" {
   for_each      = toset(var.availability_zones)
-  ami           = var.firewall_ami_id
+  ami           = var.vmseries_ami_id
   instance_type = var.instance_type
 
 
