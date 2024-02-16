@@ -100,14 +100,14 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         :return: list of dict with interface settings
         """
         # Load network interfaces configuration from environment variable
-        data_subnets: dict[str, str] = json.loads(os.environ["interfaces_config"])
+        subnets: dict[str, str] = json.loads(os.environ["interfaces_config"])
 
         # For each network interface, prepare settings in a propriate structure
 
         return {
             "index": 1,
-            "subnet": data_subnets[instance_zone],
-            "sg": os.environ["data_sgr_id"],
+            "subnet": subnets[instance_zone],
+            "sg": os.environ["sgr_id"],
         }
 
     def inspect_ec2_instance(self, instance_id: str) -> tuple:
