@@ -145,12 +145,12 @@ resource "aws_lambda_function" "pa_lambda" {
 
   vpc_config {
     subnet_ids         = var.mgmt_subnets
-    security_group_ids = [aws_security_group.fw_mgmt_sg.id]
+    security_group_ids = [aws_security_group.lambda_sg.id]
   }
 
   environment {
     variables = {
-      interfaces_config = jsonencode({for subnet in data.aws_subnet.mgmt_subnet_data: subnet.availability_zone => subnet.id})
+      interfaces_config = jsonencode({ for subnet in data.aws_subnet.mgmt_subnet_data : subnet.availability_zone => subnet.id })
       sgr_id            = aws_security_group.fw_mgmt_sg.id
       panorama_config   = aws_secretsmanager_secret.panorama_config_secret.arn
       fw_delicense      = var.delicense_enabled
