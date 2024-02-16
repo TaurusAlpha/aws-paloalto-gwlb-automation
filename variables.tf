@@ -143,12 +143,6 @@ variable "bootstrap_config" {
   default     = null
 }
 
-variable "secure_bootstrap" {
-  description = "Use AWS Secrets Manager for secure bootstrap"
-  type        = bool
-  default     = true
-}
-
 # ---------------------------------------------------------------------------------------------------------------------
 # NETWORK PARAMETERS
 # ---------------------------------------------------------------------------------------------------------------------
