@@ -120,9 +120,7 @@ resource "aws_launch_template" "fw_asg_launch_tmpl" {
   ebs_optimized          = true
   instance_type          = var.instance_type
   key_name               = coalesce(try(aws_key_pair.fw-ssh-keypair[0].key_name, null), var.ssh_key_pair)
-  user_data              = base64encode("secret_name=${var.name_prefix}-bootstrap-secret-${random_id.deployment_id.hex}\nmgmt-interface-swap=enable\nplugin-op-commands=aws-gwlb-inspect:enable\n")
-  update_default_version = true
-
+  user_data              = base64encode("mgmt-interface-swap=enable\nplugin-op-commands=aws-gwlb-inspect:enable\nsecret_name=${var.name_prefix}-secret-bootstrap-${random_id.deployment_id.hex}\n")
   iam_instance_profile {
     name = aws_iam_instance_profile.iam-instance-profile.name
   }

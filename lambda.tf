@@ -42,7 +42,7 @@ resource "aws_iam_role_policy" "lambda_iam_policy_default" {
                 "logs:PutLogEvents"
             ],
             "Effect": "Allow",
-            "Resource": "arn:aws:logs:*:*:*"
+            "Resource": "arn:aws:logs:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:${var.name_prefix}-asg-actions-${random_id.deployment_id.hex}"
         },
         {
             "Action": [
@@ -150,10 +150,11 @@ resource "aws_lambda_function" "pa_lambda" {
 
   environment {
     variables = {
-      interfaces_config = jsonencode({ for subnet in data.aws_subnet.mgmt_subnet_data : subnet.availability_zone => subnet.id })
-      sgr_id            = aws_security_group.fw_mgmt_sg.id
-      panorama_config   = aws_secretsmanager_secret.panorama_config_secret.arn
-      fw_delicense      = var.delicense_enabled
+      interfaces_config     = jsonencode({ for subnet in data.aws_subnet.mgmt_subnet_data : subnet.availability_zone => subnet.id })
+      sgr_id                = aws_security_group.fw_mgmt_sg.id
+      panorama_config       = aws_secretsmanager_secret.panorama_config_secret.arn
+      fw_delicense          = var.delicense_enabled
+      logger_level          = "INFO"
     }
   }
 

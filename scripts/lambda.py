@@ -151,15 +151,17 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 "NetworkInterfaceId"
             ]
             self.logger.info(f"Created network interface: {network_interface_id}")
-            return network_interface_id
+
         except ClientError as e:
             self.logger.error(
                 f"Error creating network interface: {e.response['Error']['Code']}"
             )
 
+        return network_interface_id
+
     def create_and_configure_new_network_interface(
         self, instance_id: str, interface: dict
-    ):
+    ) -> None:
         """
         This function call create_network_interface for create new ENI and after that through att_network_interface
         attach ENI to proper EC2 and fix ENI configuration.
@@ -192,6 +194,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         :param index: ENI index number in EC2 instance
         :return: none
         """
+        attachment_id = ""
 
         self.logger.debug(
             f"DEBUG: attach_interface: instance_id={instance_id}, interface_id={interface_id}, "
@@ -218,6 +221,8 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         else:
             self.logger.error(f"Missing values for either instance_id or interface_id!")
 
+        return attachment_id
+
     def disable_source_dest_check(self, interface_id: str):
         """
         Network interfaces created by resource "aws_launch_template" by default have option
@@ -236,13 +241,10 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             },
         )
 
-    def modify_network_interface(
-        self, interface_id: str, attachment_id: str, source_dest_check: bool = False
-    ):
+    def modify_network_interface(self, interface_id: str, attachment_id: str):
         """
         This function modify ENI to be able to delete it on EC2 termination.
 
-        :param source_dest_check: Enable or disable source destination check in ENI
         :param interface_id: Network Interface id
         :param attachment_id: ENI attachment id
         :return:
@@ -250,7 +252,6 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
 
         self.logger.debug(
             f"DEBUG: tune_interface: interface_id={interface_id}, attachment_id={attachment_id}, "
-            f"source_dest_check: {source_dest_check}"
         )
 
         # Modify ENI attribute in order to be able to delete it on EC2 terminations
@@ -258,15 +259,6 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             Attachment={"AttachmentId": attachment_id, "DeleteOnTermination": True},
             NetworkInterfaceId=interface_id,
         )
-
-        # If source/destination check was defined, then change its value according to provided settings
-        if not source_dest_check:
-            self.ec2_client.modify_network_interface_attribute(
-                NetworkInterfaceId=interface_id,
-                SourceDestCheck={
-                    "Value": source_dest_check,
-                },
-            )
 
     def delete_interface(self, interface_id: str):
         """
@@ -376,12 +368,18 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         if os.environ["fw_delicense"]:
             # Find IP address of VM-Series instance managed by Panorama
             vmseries_ip_address = self.ip_network_interface(instance_id, "1")
+            # If IP address not found, quit
+            if not vmseries_ip_address:
+                return False
+
             self.logger.debug(
-                f"Found VM-Series ID: {instance_id} IP: {vmseries_ip_address} "
+                f"Found VM-Series ID: {instance_id} with IP: {vmseries_ip_address} "
             )
 
             # Get setting required to connect to Panorama
             panorama_config_secret_arn = os.getenv("panorama_config")
+            if not panorama_config_secret_arn:
+                raise Exception("Panorama config not found. Please check configuration")
             panorama_config = self.get_secret_config(panorama_config_secret_arn)
             panorama_username = panorama_config.get("username")
             panorama_password = panorama_config.get("password")
@@ -460,7 +458,10 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 if info.tag == "local-info":
                     for attr in info:
                         if attr.tag == "state":
-                            active = "active" in attr.text
+                            if attr.text == "active":
+                                active = True
+                            else:
+                                active = False
 
             # Return high-availability state
             return active
