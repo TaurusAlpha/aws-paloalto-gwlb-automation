@@ -36,22 +36,18 @@ resource "aws_lb_listener" "pa_gwlb_listener" {
 resource "aws_vpc_endpoint_service" "pa_gwlb_vpces" {
   gateway_load_balancer_arns = [aws_lb.pa_gwlb.arn]
   acceptance_required        = false
-  allowed_principals         = [
-    "arn:aws:iam::${data.aws_caller_identity.pa_caller.account_id}:root",
-    # todo: remove hardcoded account id
-    "arn:aws:iam::058264066739:root"
-  ]
+  allowed_principals         = concat(["arn:aws:iam::${data.aws_caller_identity.pa_caller.account_id}:root"], var.gwlb_allowed_principals_arn)
 }
 
 resource "aws_vpc_endpoint" "pa_gwlb_vpce" {
   for_each     = toset(var.availability_zone_ids)
   service_name = aws_vpc_endpoint_service.pa_gwlb_vpces.service_name
-  subnet_ids   = flatten([
+  subnet_ids = flatten([
     for subnet in data.aws_subnet.gwlbe_subnet_data : subnet.id if subnet.availability_zone_id == each.value
   ])
   vpc_endpoint_type = aws_vpc_endpoint_service.pa_gwlb_vpces.service_type
   vpc_id            = var.vpc_id
-  tags              = {
+  tags = {
     Name = "${var.name_prefix}-vpce-${each.value}-${random_id.deployment_id.hex}"
   }
 }

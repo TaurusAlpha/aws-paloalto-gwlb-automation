@@ -28,7 +28,7 @@ variable "name_suffix" {
 variable "default_tag" {
   description = "Default tag to apply to all resources (i.e map-migrated)"
   type        = map(string)
-  default     = {
+  default = {
     key : ""
   }
 }
@@ -180,6 +180,16 @@ variable "tgwa_subnets" {
 variable "tgwa_route_tables" {
   description = "IDs of rroute tables associated with TGWA subnets"
   type        = list(string)
+}
+
+variable "gwlb_allowed_principals_arn" {
+  description = <<EOF
+  ARNs of additional allowed principals to associate with GWLB
+  Terrafrom caller arn is included by default
+  i.e. arn:aws:iam::123456789123:root
+  EOF
+  type        = list(string)
+  default     = []
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
