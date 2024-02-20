@@ -29,7 +29,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             "secretsmanager", region_name=os.environ["AWS_REGION"]
         )
 
-    def run(self, asg_event: dict):
+    def run(self, asg_event: dict) -> None:
         """
         Main function is used for handle correct lifecycle action (instance launch or instance terminate).
 
@@ -58,8 +58,9 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         elif event == "EC2 Instance-terminate Lifecycle Action":
             self.logger.info("Run cleanup mode.")
 
-            # Delicense firewall using plugin sw_fw_license in Panorama (optional)
-            self.delicense_fw(instance_id)
+            if os.environ["fw_delicense"]:
+                # Delicense firewall using plugin sw_fw_license in Panorama (optional)
+                self.delicense_fw(instance_id)
 
         else:
             raise Exception(f"Event type cannot be handled! {event}")
@@ -364,54 +365,36 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         :param instance_id: EC2 Instance id
         :return: True if VM-Series was de-licensed correctly, False in other case
         """
-        # Check if delicense FW or not
-        if os.environ["fw_delicense"]:
-            # Find IP address of VM-Series instance managed by Panorama
-            vmseries_ip_address = self.ip_network_interface(instance_id, "1")
-            # If IP address not found, quit
-            if not vmseries_ip_address:
-                return False
+        delicensed = False
 
-            self.logger.debug(
-                f"Found VM-Series ID: {instance_id} with IP: {vmseries_ip_address} "
-            )
+        # Find IP address of VM-Series instance managed by Panorama
+        vmseries_ip_address = self.ip_network_interface(instance_id, "1")
+        # If IP address not found, quit
+        if not vmseries_ip_address:
+            return False
 
-            # Get setting required to connect to Panorama
-            panorama_config_secret_arn = os.getenv("panorama_config")
-            if not panorama_config_secret_arn:
-                raise Exception("Panorama config not found. Please check configuration")
-            panorama_config = self.get_secret_config(panorama_config_secret_arn)
-            panorama_username = panorama_config.get("username")
-            panorama_password = panorama_config.get("password")
-            panorama_hostname = panorama_config.get("panorama1")
-            panorama_hostname2 = panorama_config.get("panorama2")
-            panorama_lm_name = panorama_config.get("license_manager")
+        self.logger.debug(
+            f"Found VM-Series ID: {instance_id} with IP: {vmseries_ip_address} "
+        )
 
-            # Check if there is defined 2 Panorama server
-            if "panorama2" in panorama_config:
-                # Check if first Panorama is active - if not, the use second Panorama for de-licensing
-                if self.check_is_active_in_ha(
-                    panorama_hostname, panorama_username, panorama_password
-                ):
-                    # De-license using active, first Panorama instance from Active-Passive HA cluster
-                    delicensed = self.request_panorama_delicense_fw(
-                        vmseries_ip_address,
-                        panorama_hostname,
-                        panorama_username,
-                        panorama_password,
-                        panorama_lm_name,
-                    )
-                else:
-                    # De-license using active, second Panorama instance from Active-Passive HA cluster
-                    delicensed = self.request_panorama_delicense_fw(
-                        vmseries_ip_address,
-                        panorama_hostname2,
-                        panorama_username,
-                        panorama_password,
-                        panorama_lm_name,
-                    )
-            else:
-                # De-license using the only 1 Panorama instance
+        # Get setting required to connect to Panorama
+        panorama_config_secret_arn = os.getenv("panorama_config")
+        if not panorama_config_secret_arn:
+            raise Exception("Panorama config not found. Please check configuration")
+        panorama_config = self.get_secret_config(panorama_config_secret_arn)
+        panorama_username = panorama_config.get("username")
+        panorama_password = panorama_config.get("password")
+        panorama_hostname = panorama_config.get("panorama1")
+        panorama_hostname2 = panorama_config.get("panorama2")
+        panorama_lm_name = panorama_config.get("license_manager")
+
+        # Check if there is defined 2 Panorama server
+        if "panorama2" in panorama_config:
+            # Check if first Panorama is active - if not, the use second Panorama for de-licensing
+            if self.check_is_active_in_ha(
+                panorama_hostname, panorama_username, panorama_password
+            ):
+                # De-license using active, first Panorama instance from Active-Passive HA cluster
                 delicensed = self.request_panorama_delicense_fw(
                     vmseries_ip_address,
                     panorama_hostname,
@@ -419,10 +402,26 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                     panorama_password,
                     panorama_lm_name,
                 )
-
-            return delicensed
+            else:
+                # De-license using active, second Panorama instance from Active-Passive HA cluster
+                delicensed = self.request_panorama_delicense_fw(
+                    vmseries_ip_address,
+                    panorama_hostname2,
+                    panorama_username,
+                    panorama_password,
+                    panorama_lm_name,
+                )
         else:
-            return False
+            # De-license using the only 1 Panorama instance
+            delicensed = self.request_panorama_delicense_fw(
+                vmseries_ip_address,
+                panorama_hostname,
+                panorama_username,
+                panorama_password,
+                panorama_lm_name,
+            )
+
+        return delicensed
 
     def check_is_active_in_ha(
         self, panorama_hostname, panorama_username, panorama_password
