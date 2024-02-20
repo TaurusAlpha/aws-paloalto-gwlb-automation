@@ -7,6 +7,12 @@ resource "aws_secretsmanager_secret_version" "panorama_config" {
   secret_string = jsonencode(var.panorama_config)
 }
 
+resource "aws_cloudwatch_log_group" "lambda_log_group" {
+  name              = "/aws/lambda/${var.name_prefix}-asg-actions-${random_id.deployment_id.hex}"
+  skip_destroy      = false
+  retention_in_days = 30
+}
+
 # IAM role that will be used for Lambda function
 resource "aws_iam_role" "pa_lambda_iam_role" {
   name               = "${var.name_prefix}-lambda-role-${random_id.deployment_id.hex}"
@@ -33,50 +39,49 @@ resource "aws_iam_role_policy" "lambda_iam_policy_default" {
   role   = aws_iam_role.pa_lambda_iam_role.id
   policy = <<-EOF
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Action": [
-                "logs:CreateLogGroup",
-                "logs:CreateLogStream",
-                "logs:PutLogEvents"
-            ],
-            "Effect": "Allow",
-            "Resource": "arn:aws:logs:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:${var.name_prefix}-asg-actions-${random_id.deployment_id.hex}"
-        },
-        {
-            "Action": [
-                "ec2:AllocateAddress",
-                "ec2:AssociateAddress",
-                "ec2:AttachNetworkInterface",
-                "ec2:CreateNetworkInterface",
-                "ec2:DescribeAddresses",
-                "ec2:DescribeInstances",
-                "ec2:DescribeNetworkInterfaces",
-                "ec2:DescribeSubnets",
-                "ec2:DeleteNetworkInterface",
-                "ec2:DetachNetworkInterface",
-                "ec2:DisassociateAddress",
-                "ec2:ModifyNetworkInterfaceAttribute",
-                "ec2:ReleaseAddress",
-                "autoscaling:CompleteLifecycleAction",
-                "autoscaling:DescribeAutoScalingGroups",
-                "elasticloadbalancing:RegisterTargets",
-                "elasticloadbalancing:DeregisterTargets"
-            ],
-            "Effect": "Allow",
-            "Resource": "*"
-        },
-        {
-          "Effect": "Allow",
-          "Action": [
-            "kms:GenerateDataKey*",
-            "kms:Decrypt",
-            "kms:CreateGrant"
-          ],
-          "Resource": "*"
-        }
-    ]
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Effect": "Allow",
+      "Resource": "${aws_cloudwatch_log_group.lambda_log_group.arn}:*"
+    },
+    {
+      "Action": [
+        "ec2:AllocateAddress",
+        "ec2:AssociateAddress",
+        "ec2:AttachNetworkInterface",
+        "ec2:CreateNetworkInterface",
+        "ec2:DescribeAddresses",
+        "ec2:DescribeInstances",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets",
+        "ec2:DeleteNetworkInterface",
+        "ec2:DetachNetworkInterface",
+        "ec2:DisassociateAddress",
+        "ec2:ModifyNetworkInterfaceAttribute",
+        "ec2:ReleaseAddress",
+        "autoscaling:CompleteLifecycleAction",
+        "autoscaling:DescribeAutoScalingGroups",
+        "elasticloadbalancing:RegisterTargets",
+        "elasticloadbalancing:DeregisterTargets"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kms:GenerateDataKey*",
+        "kms:Decrypt",
+        "kms:CreateGrant"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 EOF
 }
@@ -87,21 +92,21 @@ resource "aws_iam_role_policy" "lambda_iam_policy_delicense" {
   role   = aws_iam_role.pa_lambda_iam_role.id
   policy = <<-EOF
 {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "SecretsManagerRead",
-            "Effect": "Allow",
-            "Action": [
-                "secretsmanager:GetResourcePolicy",
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-                "secretsmanager:ListSecrets",
-                "secretsmanager:ListSecretVersionIds"
-            ],
-            "Resource": "${aws_secretsmanager_secret.panorama_config_secret.arn}"
-        }
-    ]
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SecretsManagerRead",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:ListSecrets",
+        "secretsmanager:ListSecretVersionIds"
+      ],
+      "Resource": "${aws_secretsmanager_secret.panorama_config_secret.arn}"
+    }
+  ]
 }
 EOF
 }
@@ -150,15 +155,14 @@ resource "aws_lambda_function" "pa_lambda" {
 
   environment {
     variables = {
-      interfaces_config     = jsonencode({ for subnet in data.aws_subnet.mgmt_subnet_data : subnet.availability_zone => subnet.id })
-      sgr_id                = aws_security_group.fw_mgmt_sg.id
-      panorama_config       = aws_secretsmanager_secret.panorama_config_secret.arn
-      fw_delicense          = var.delicense_enabled
-      logger_level          = "INFO"
+      interfaces_config = jsonencode({ for subnet in data.aws_subnet.mgmt_subnet_data : subnet.availability_zone => subnet.id })
+      sgr_id            = aws_security_group.fw_mgmt_sg.id
+      panorama_config   = aws_secretsmanager_secret.panorama_config_secret.arn
+      fw_delicense      = var.delicense_enabled
     }
   }
 
-  depends_on = [data.archive_file.lambda_archive]
+  depends_on = [data.archive_file.lambda_archive, aws_cloudwatch_log_group.lambda_log_group]
 }
 
 resource "aws_lambda_permission" "lambda_event_invoke_persmissions" {
