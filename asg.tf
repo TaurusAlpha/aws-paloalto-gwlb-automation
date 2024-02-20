@@ -1,8 +1,4 @@
 # ---------------------------------------------------------------------------------------------------------------------
-# CREATE ASG AND PEREQUISITES
-# ---------------------------------------------------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------------------------------------------------
 # CREATE SECRET WITH PA BOOTSTRAP DATA
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -57,47 +53,47 @@ resource "aws_iam_policy" "fw-iam-policy" {
 {
   "Version": "2012-10-17",
   "Statement": [
-        {
-            "Action": [
-                "ec2:AttachNetworkInterface",
-                "ec2:DetachNetworkInterface",
-                "ec2:DescribeInstances",
-                "ec2:DescribeNetworkInterfaces"
-            ],
-            "Resource": [
-                "*"
-            ],
-            "Effect": "Allow"
-        },
-        {
-            "Action": [
-                "cloudwatch:PutMetricData"
-            ],
-            "Resource": [
-                "*"
-            ],
-            "Effect": "Allow"
-        },
-        {
-          "Action": [
-                "secretsmanager:GetResourcePolicy",
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret",
-                "secretsmanager:ListSecrets",
-                "secretsmanager:ListSecretVersionIds"
-          ],
-          "Resource": "${aws_secretsmanager_secret.bootstrap_config_secret.arn}",
-          "Effect": "Allow"
-        },
-        {
-            "Action": [
-                "logs:CreateLogGroup",
-                "logs:CreateLogStream",
-                "logs:PutLogEvents"
-            ],
-            "Effect": "Allow",
-            "Resource": "arn:aws:logs:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:*"
-        }
+    {
+      "Action": [
+        "ec2:AttachNetworkInterface",
+        "ec2:DetachNetworkInterface",
+        "ec2:DescribeInstances",
+        "ec2:DescribeNetworkInterfaces"
+      ],
+      "Resource": [
+          "*"
+      ],
+      "Effect": "Allow"
+    },
+    {
+      "Action": [
+          "cloudwatch:PutMetricData"
+      ],
+      "Resource": [
+          "*"
+      ],
+      "Effect": "Allow"
+    },
+    {
+      "Action": [
+        "secretsmanager:GetResourcePolicy",
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret",
+        "secretsmanager:ListSecrets",
+        "secretsmanager:ListSecretVersionIds"
+      ],
+      "Resource": "${aws_secretsmanager_secret.bootstrap_config_secret.arn}",
+      "Effect": "Allow"
+    },
+    {
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:logs:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:*"
+    }
   ]
 }
 EOF
@@ -115,12 +111,12 @@ resource "aws_iam_instance_profile" "iam-instance-profile" {
 
 # Create Launch Template for the ASG
 resource "aws_launch_template" "fw_asg_launch_tmpl" {
-  name                   = "${var.name_prefix}-asg-tmpl-${random_id.deployment_id.hex}"
-  image_id               = coalesce(var.vmseries_ami_id, try(data.aws_ami.ami_id[0].id, null))
-  ebs_optimized          = true
-  instance_type          = var.instance_type
-  key_name               = coalesce(try(aws_key_pair.fw-ssh-keypair[0].key_name, null), var.ssh_key_pair)
-  user_data              = base64encode("mgmt-interface-swap=enable\nplugin-op-commands=aws-gwlb-inspect:enable\nsecret_name=${var.name_prefix}-secret-bootstrap-${random_id.deployment_id.hex}\n")
+  name          = "${var.name_prefix}-asg-tmpl-${random_id.deployment_id.hex}"
+  image_id      = coalesce(var.vmseries_ami_id, try(data.aws_ami.ami_id[0].id, null))
+  ebs_optimized = true
+  instance_type = var.instance_type
+  key_name      = coalesce(try(aws_key_pair.fw-ssh-keypair[0].key_name, null), var.ssh_key_pair)
+  user_data     = base64encode("mgmt-interface-swap=enable\nplugin-op-commands=aws-gwlb-inspect:enable\nsecret_name=${var.name_prefix}-secret-bootstrap-${random_id.deployment_id.hex}\n")
   iam_instance_profile {
     name = aws_iam_instance_profile.iam-instance-profile.name
   }
