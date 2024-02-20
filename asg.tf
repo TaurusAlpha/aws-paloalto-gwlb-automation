@@ -197,4 +197,13 @@ resource "aws_autoscaling_group" "fw_asg" {
     value               = "${var.name_prefix}-${random_id.deployment_id.hex}"
     propagate_at_launch = true
   }
+
+  dynamic "tag" {
+    for_each = var.default_tag
+    content {
+      key                 = tag.key
+      value               = tag.value
+      propagate_at_launch = true
+    }
+  }
 }
