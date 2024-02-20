@@ -24,7 +24,6 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         # Prepare boto3 clients for required services
         self.ec2_client = client("ec2", region_name=os.environ["AWS_REGION"])
         self.asg_client = client("autoscaling", region_name=os.environ["AWS_REGION"])
-        self.elbv2_client = client("elbv2", region_name=os.environ["AWS_REGION"])
         self.secret_client = client(
             "secretsmanager", region_name=os.environ["AWS_REGION"]
         )

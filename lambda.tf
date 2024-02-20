@@ -65,9 +65,7 @@ resource "aws_iam_role_policy" "lambda_iam_policy_default" {
         "ec2:ModifyNetworkInterfaceAttribute",
         "ec2:ReleaseAddress",
         "autoscaling:CompleteLifecycleAction",
-        "autoscaling:DescribeAutoScalingGroups",
-        "elasticloadbalancing:RegisterTargets",
-        "elasticloadbalancing:DeregisterTargets"
+        "autoscaling:DescribeAutoScalingGroups"
       ],
       "Effect": "Allow",
       "Resource": "*"
