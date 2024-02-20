@@ -28,7 +28,7 @@ variable "name_suffix" {
 variable "default_tag" {
   description = "Default tag to apply to all resources (i.e map-migrated)"
   type        = map(string)
-  default = {
+  default     = {
     key : ""
   }
 }
@@ -147,8 +147,8 @@ variable "bootstrap_config" {
 # NETWORK PARAMETERS
 # ---------------------------------------------------------------------------------------------------------------------
 
-variable "availability_zones" {
-  description = "Availability zones in a region to deploy instances to"
+variable "availability_zone_ids" {
+  description = "Availability zone IDs in a region to deploy instances to"
   type        = list(string)
 }
 
@@ -174,6 +174,11 @@ variable "gwlbe_subnets" {
 
 variable "tgwa_subnets" {
   description = "TGWa subnet ids used by Transit Gateway attachment"
+  type        = list(string)
+}
+
+variable "tgwa_route_tables" {
+  description = "IDs of rroute tables associated with TGWA subnets"
   type        = list(string)
 }
 

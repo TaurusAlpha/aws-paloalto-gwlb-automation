@@ -114,7 +114,7 @@ resource "null_resource" "python_requirements" {
   }
 
   provisioner "local-exec" {
-    command = "pip install --upgrade --target ${path.module}/scripts -r ${path.module}/scripts/requirements.txt"
+    command = "pip3 install --upgrade --target ${path.module}/scripts -r ${path.module}/scripts/requirements.txt"
   }
 }
 
