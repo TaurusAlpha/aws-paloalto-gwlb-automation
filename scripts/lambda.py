@@ -604,15 +604,14 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             cmd = "show high-availability state"
             firewalls_parsed = self.panorama_cmd(panorama, cmd=cmd)
 
-            # Check if in active state
-            for info in firewalls_parsed[0]:
-                if info.tag == "local-info":
-                    for attr in info:
-                        if attr.tag == "state":
-                            if attr.text == "active":
-                                active = True
-                            else:
-                                active = False
+            # Check if in active state (robust XML parsing)
+            state_element = firewalls_parsed.find(".//local-info/state")
+            if state_element is not None and state_element.text:
+                active = state_element.text.strip().lower() == "active"
+            else:
+                self.logger.warning(
+                    f"Could not determine HA state from Panorama {panorama_hostname} response"
+                )
 
             # Return high-availability state
             return active
