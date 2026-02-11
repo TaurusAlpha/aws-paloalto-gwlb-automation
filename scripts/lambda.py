@@ -525,6 +525,21 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         panorama_hostname2 = panorama_config.get("panorama2")
         panorama_lm_name = panorama_config.get("license_manager")
 
+        # Validate required Panorama configuration values
+        required_fields = {
+            "username": panorama_username,
+            "password": panorama_password,
+            "panorama1": panorama_hostname,
+            "license_manager": panorama_lm_name,
+        }
+
+        missing_fields = [key for key, value in required_fields.items() if not value]
+        if missing_fields:
+            self.logger.error(
+                f"Missing required Panorama configuration fields: {', '.join(missing_fields)}"
+            )
+            return False
+
         # Check if there is defined 2 Panorama server
         if "panorama2" in panorama_config:
             # Check if first Panorama is active - if not, the use second Panorama for de-licensing
