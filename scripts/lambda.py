@@ -176,7 +176,6 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         az = instance_info.get("Placement", {}).get("AvailabilityZone")
         subnet_id = instance_info.get("SubnetId")
         self.logger.info(f"Instance {instance_id} in AZ={az} Subnet={subnet_id}")
-        self.logger.debug(f"Instance info: {instance_info}")
         return (
             az,
             subnet_id,
@@ -414,21 +413,15 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         :param instance_id: EC2 Instance id
         :return: none
         """
+        self.logger.debug(
+            f"Looking up ENI for instance {instance_id} device-index={device_index}"
+        )
         description = self.ec2_client.describe_network_interfaces(
             Filters=[
                 {"Name": "attachment.instance-id", "Values": [instance_id]},
                 {"Name": "attachment.device-index", "Values": [device_index]},
             ]
         )
-        debug_response = self.ec2_client.describe_network_interfaces(
-            Filters=[
-                {"Name": "attachment.instance-id", "Values": [instance_id]},
-            ]
-        )
-        self.logger.info(
-            f"Found interfaces for {instance_id} instance: {debug_response}"
-        )
-        self.logger.info(f"Found interface: {description}")
         try:
             return description["NetworkInterfaces"][0]["PrivateIpAddress"]
         except (IndexError, KeyError) as e:
