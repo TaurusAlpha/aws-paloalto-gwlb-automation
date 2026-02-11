@@ -39,17 +39,18 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         """
         # Acquire information about subnets, AZ, network interfaces, instance ID and target group ARN
         self.logger.info(f"Recieved event: {asg_event}")
-        instance_id = asg_event["detail"]["EC2InstanceId"]
-        instance_zone, subnet_id, network_interfaces = self.inspect_ec2_instance(
-            instance_id
-        )
 
         # Depending on event type, take appropriate actions
         event = asg_event.get("detail-type", "")
         lifecycle_result = "CONTINUE"
 
         try:
+            instance_id = asg_event["detail"]["EC2InstanceId"]
+            instance_zone, subnet_id, network_interfaces = self.inspect_ec2_instance(
+                instance_id
+            )
             if event == "EC2 Instance-launch Lifecycle Action":
+
                 self.logger.info("Run launch mode.")
 
                 # Disable source-destination check for first dataplane interface
@@ -172,10 +173,13 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         instance_info: dict = self.ec2_client.describe_instances(
             InstanceIds=[instance_id]
         )["Reservations"][0]["Instances"][0]
-        self.logger.info(f"Instance {instance_id} info: {instance_info}")
+        az = instance_info.get("Placement", {}).get("AvailabilityZone")
+        subnet_id = instance_info.get("SubnetId")
+        self.logger.info(f"Instance {instance_id} in AZ={az} Subnet={subnet_id}")
+        self.logger.debug(f"Instance info: {instance_info}")
         return (
-            instance_info.get("Placement", {}).get("AvailabilityZone"),
-            instance_info.get("SubnetId"),
+            az,
+            subnet_id,
             instance_info.get("NetworkInterfaces"),
         )
 
@@ -249,16 +253,35 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             instance_id, interface["subnet"], interface["sg"], device_index=device_index
         )
 
-        # If ENI ID was returned, attach ENI to instance
-        if interface_id is not None:
-            try:
-                attachment_id = self.attach_network_interface(
-                    instance_id, interface_id, device_index
-                )
+        if not interface_id:
+            self.logger.error(
+                f"Failed to create ENI for instance {instance_id} device-index={device_index}."
+            )
+            return
+
+        # Wait until the ENI is available before attempting to attach
+        try:
+            waiter = self.ec2_client.get_waiter("network_interface_available")
+            waiter.wait(NetworkInterfaceIds=[interface_id])
+            self.logger.debug(f"ENI {interface_id} is now available.")
+        except Exception as e:
+            self.logger.error(
+                f"Error waiting for ENI {interface_id} to become available: {e}. Deleting ENI."
+            )
+            self.delete_interface(interface_id)
+            return
+
+        try:
+            attachment_id = self.attach_network_interface(
+                instance_id, interface_id, device_index
+            )
+            if attachment_id:
                 self.modify_network_interface(interface_id, attachment_id)
-            except Exception as e:
-                self.logger.error(f"Error attaching or modifying ENI: {e}")
-                self.delete_interface(interface_id)
+            else:
+                raise RuntimeError("Attachment ID not returned.")
+        except Exception as e:
+            self.logger.error(f"Error attaching or modifying ENI: {e}")
+            self.delete_interface(interface_id)
 
     def attach_network_interface(
         self, instance_id: str, interface_id: str, index: int
