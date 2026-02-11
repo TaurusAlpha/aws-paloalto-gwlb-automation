@@ -39,8 +39,8 @@ This project automates the deployment of Palo Alto VM-Series firewalls behind an
 ## Prerequisites
 
 - AWS account with sufficient permissions
-- Terraform >= 0.12
-- Python 3.8+ (for Lambda)
+- Terraform >= 0.14
+- Python 3.12+ (for Lambda)
 - [pan-os-python](https://github.com/PaloAltoNetworks/pan-os-python), boto3
 
 ## Setup & Usage
@@ -52,11 +52,11 @@ This project automates the deployment of Palo Alto VM-Series firewalls behind an
 
 - `cd scripts && pip3 install --upgrade --target . -r requirements.txt`
 
-5. **Initialize Terraform**
+1. **Initialize Terraform**
 
 - `terraform init`
 
-6. **Plan and apply**
+1. **Plan and apply**
 
 - `terraform plan`
 - `terraform apply`
