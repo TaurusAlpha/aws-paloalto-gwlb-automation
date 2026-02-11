@@ -76,6 +76,31 @@ Key outputs include:
 - Panorama and bootstrap secret names
 - Deployment ID suffix
 
+## Example terraform.tfvars
+
+Create a `terraform.tfvars` (or pass via CLI) with environment-specific values. Minimal example:
+
+```
+profile_name = "default"
+region       = "us-west-2"
+name_prefix  = "example"
+vpc_id       = "vpc-0123456789abcdef0"
+availability_zone_ids = ["use1-az1","use1-az2"]
+mgmt_subnets  = ["subnet-aaa","subnet-bbb"]
+data_subnets  = ["subnet-ccc","subnet-ddd"]
+gwlbe_subnets = ["subnet-eee","subnet-fff"]
+tgwa_subnets  = ["subnet-ggg","subnet-hhh"]
+tgwa_route_tables = ["rtb-111","rtb-222"]
+# Provide either vmseries_ami_id or vmseries_version/product code
+# vmseries_ami_id = "ami-0123456789abcdef0"
+vmseries_version = "10.2.0"
+# Optional: provide existing keypair name or public_key
+ssh_key_pair = "my-keypair"
+# Panorama and bootstrap configs should be stored in Secrets Manager in production;
+# provide here only for testing (sensitive values).
+# panorama_config = { "username"="admin" "password"="pass" "panorama1"="1.2.3.4" }
+```
+
 ## Security
 
 - Sensitive data is stored in AWS Secrets Manager
