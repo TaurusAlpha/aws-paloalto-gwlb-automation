@@ -28,3 +28,18 @@ output "bootstrap_config_secret" {
 output "deployment_id_suffix" {
   value = random_id.deployment_id.hex
 }
+
+output "gwlb_arn" {
+  value       = aws_lb.pa_gwlb.arn
+  description = "ARN of the Gateway Load Balancer."
+}
+
+output "gwlb_target_group_arn" {
+  value       = aws_lb_target_group.pa_gwlb_tg.arn
+  description = "ARN of the GWLB target group."
+}
+
+output "autoscaling_group_name" {
+  value       = aws_autoscaling_group.fw_asg.name
+  description = "Name of the Auto Scaling Group managing VM-Series instances."
+}
