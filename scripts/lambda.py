@@ -657,7 +657,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             firewalls_parsed = self.panorama_cmd(panorama, cmd=cmd)
 
             # If the command succeeded, start sweeping the list of FWs
-            if firewalls_parsed.attrib["status"] == "success":
+            if firewalls_parsed.attrib.get("status") == "success":
                 do_commit = False
                 self.logger.info("Parsing firewall list")
                 for fw in firewalls_parsed[0][0]:
@@ -679,7 +679,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                                     )
                                     cmd = f'request plugins sw_fw_license deactivate license-manager "{panorama_lm_name}" devices member "{serial}"'
                                     resp_parsed = self.panorama_cmd(panorama, cmd)
-                                    if resp_parsed.attrib["status"] == "success":
+                                    if resp_parsed.attrib.get("status") == "success":
                                         self.logger.info(
                                             f"De-licensing firewall: {serial} succeeded"
                                         )
@@ -692,7 +692,14 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 # Commit changes in case we did de-license a FW
                 if do_commit:
                     self.logger.info("Committing changes in Panorama")
-                    panorama.commit(sync=False, admins="__sw_fw_license")
+                    try:
+                        panorama.commit(sync=False, admins="__sw_fw_license")
+                        self.logger.info("Panorama commit completed successfully")
+                    except Exception as commit_error:
+                        self.logger.error(
+                            f"Panorama commit failed after de-licensing operation: {commit_error}"
+                        )
+                        return False
 
             # Return final result of de-licensing
             return delicensed
