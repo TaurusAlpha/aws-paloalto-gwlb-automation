@@ -46,30 +46,77 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
 
         # Depending on event type, take appropriate actions
         event = asg_event.get("detail-type", "")
-        if event == "EC2 Instance-launch Lifecycle Action":
-            self.logger.info("Run launch mode.")
-            try:
+        lifecycle_result = "CONTINUE"
+
+        try:
+            if event == "EC2 Instance-launch Lifecycle Action":
+                self.logger.info("Run launch mode.")
+
                 # Disable source-destination check for first dataplane interface
                 self.disable_source_dest_check(network_interfaces[0]["NetworkInterfaceId"])
-                # Create network interfaces for management and second dataplane interface
+
+                # Create/attach additional network interface(s) (idempotent)
                 self.setup_network_interfaces(instance_zone, subnet_id, instance_id)
-            except Exception as e:
-                self.logger.error(f"Error during launch handling: {e}")
-                raise
-        elif event == "EC2 Instance-terminate Lifecycle Action":
-            self.logger.info("Run cleanup mode.")
-            try:
+
+            elif event == "EC2 Instance-terminate Lifecycle Action":
+                self.logger.info("Run cleanup mode.")
                 if os.environ.get("fw_delicense"):
                     # Delicense firewall using plugin sw_fw_license in Panorama (optional)
                     self.delicense_fw(instance_id)
-            except Exception as e:
-                self.logger.error(f"Error during terminate handling: {e}")
-                raise
-        else:
-            raise ValueError(f"Event type cannot be handled! {event}")
+            else:
+                raise ValueError(f"Event type cannot be handled! {event}")
 
-        # For each type of event (launch, terminate), lifecycle action needs to be completed
-        self.complete_lifecycle(asg_event["detail"])
+        except Exception as e:
+            # In launch hook, ABANDON causes the instance to be terminated and replaced.
+            # In terminate hook, ABANDON allows termination to proceed.
+            lifecycle_result = "ABANDON"
+            self.logger.exception(f"Error during lifecycle handling ({event}): {e}")
+
+        # Complete the lifecycle action with the appropriate result
+        self.complete_lifecycle(asg_event["detail"], result=lifecycle_result)
+
+        # If we abandoned, raise to surface failure in Lambda logs/metrics
+        if lifecycle_result != "CONTINUE":
+            raise RuntimeError(f"Lifecycle action abandoned due to error handling event: {event}")
+
+    def get_attached_eni_for_device_index(self, instance_id: str, device_index: int) -> tuple[Optional[str], Optional[str]]:
+        """Return (eni_id, attachment_id) for a given instance/device-index if attached, else (None, None)."""
+        try:
+            resp = self.ec2_client.describe_network_interfaces(
+                Filters=[
+                    {"Name": "attachment.instance-id", "Values": [instance_id]},
+                    {"Name": "attachment.device-index", "Values": [str(device_index)]},
+                ]
+            )
+            nis = resp.get("NetworkInterfaces", [])
+            if not nis:
+                return None, None
+
+            ni = nis[0]
+            eni_id = ni.get("NetworkInterfaceId")
+            attachment_id = (ni.get("Attachment") or {}).get("AttachmentId")
+            return eni_id, attachment_id
+        except ClientError as e:
+            self.logger.error(
+                f"Error describing network interfaces for instance {instance_id} device {device_index}: {e.response['Error'].get('Code')}"
+            )
+            return None, None
+
+    def ensure_delete_on_termination(self, interface_id: str, attachment_id: str) -> None:
+        """Ensure ENI is set to DeleteOnTermination=True (idempotent)."""
+        try:
+            self.ec2_client.modify_network_interface_attribute(
+                Attachment={"AttachmentId": attachment_id, "DeleteOnTermination": True},
+                NetworkInterfaceId=interface_id,
+            )
+            self.logger.info(
+                f"Ensured DeleteOnTermination=True for ENI={interface_id} attachment={attachment_id}"
+            )
+        except ClientError as e:
+            self.logger.error(
+                f"Error setting DeleteOnTermination for ENI {interface_id}: {e.response['Error'].get('Code')}"
+            )
+            raise
 
     def setup_network_interfaces(
         self, instance_zone: str, subnet_id: str, instance_id: str
@@ -133,7 +180,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         )
 
     def create_network_interface(
-        self, instance_id: str, subnet_id: str, sg_id: str
+        self, instance_id: str, subnet_id: str, sg_id: str, device_index: int
     ) -> Optional[str]:
         """
         As function name, it creates new ENI, if something wrong it catch error.
@@ -141,15 +188,27 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         :param instance_id: EC2 Instance id
         :param subnet_id: Subnet id
         :param sg_id: Security group id
+        :param device_index: ENI device index
         :return: Network Interface id
         """
 
         self.logger.debug(
-            f"DEBUG: create_interface: instance_id={instance_id}, subnet_id={subnet_id}, sg_id={sg_id}"
+            f"DEBUG: create_interface: instance_id={instance_id}, subnet_id={subnet_id}, sg_id={sg_id}, device_index={device_index}"
         )
         try:
             network_interface = self.ec2_client.create_network_interface(
-                SubnetId=subnet_id, Groups=[sg_id]
+                SubnetId=subnet_id,
+                Groups=[sg_id],
+                TagSpecifications=[
+                    {
+                        "ResourceType": "network-interface",
+                        "Tags": [
+                            {"Key": "ManagedBy", "Value": "vmseries-lambda"},
+                            {"Key": "InstanceId", "Value": instance_id},
+                            {"Key": "DeviceIndex", "Value": str(device_index)},
+                        ],
+                    }
+                ],
             )
             network_interface_id = network_interface["NetworkInterface"][
                 "NetworkInterfaceId"
@@ -175,22 +234,31 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         :param interface: Interface dict data
         :return: none
         """
+        # Idempotency: if the device index is already attached, do not create a duplicate ENI
+        device_index = int(interface["index"])
+        existing_eni_id, existing_attachment_id = self.get_attached_eni_for_device_index(instance_id, device_index)
+        if existing_eni_id and existing_attachment_id:
+            self.logger.info(
+                f"ENI already attached for instance {instance_id} device-index={device_index}: ENI={existing_eni_id} attachment={existing_attachment_id}. Skipping creation."
+            )
+            self.ensure_delete_on_termination(existing_eni_id, existing_attachment_id)
+            return
+
         # Create ENI and get its ID
         interface_id = self.create_network_interface(
-            instance_id, interface["subnet"], interface["sg"]
+            instance_id, interface["subnet"], interface["sg"], device_index=device_index
         )
 
         # If ENI ID was returned, attach ENI to instance
         if interface_id is not None:
-            if interface["index"] != 0:
-                try:
-                    attachment_id = self.attach_network_interface(
-                        instance_id, interface_id, interface["index"]
-                    )
-                    self.modify_network_interface(interface_id, attachment_id)
-                except Exception as e:
-                    self.logger.error(f"Error attaching or modifying ENI: {e}")
-                    self.delete_interface(interface_id)
+            try:
+                attachment_id = self.attach_network_interface(
+                    instance_id, interface_id, device_index
+                )
+                self.modify_network_interface(interface_id, attachment_id)
+            except Exception as e:
+                self.logger.error(f"Error attaching or modifying ENI: {e}")
+                self.delete_interface(interface_id)
 
     def attach_network_interface(
         self, instance_id: str, interface_id: str, index: int
@@ -289,11 +357,12 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 f"Error deleting interface {interface_id}: {e.response['Error']['Code']}"
             )
 
-    def complete_lifecycle(self, asg_event: dict[str, Any]) -> None:
+    def complete_lifecycle(self, asg_event: dict[str, Any], result: str = "CONTINUE") -> None:
         """
-        If everything was completed, calling this function continue ASG lifecycle.
+        Complete the ASG lifecycle action.
 
-        :param asg_event: ASG event, dict
+        :param asg_event: ASG event details
+        :param result: CONTINUE or ABANDON
         :return: none
         """
 
@@ -303,7 +372,10 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 LifecycleHookName=asg_event["LifecycleHookName"],
                 AutoScalingGroupName=asg_event["AutoScalingGroupName"],
                 LifecycleActionToken=asg_event["LifecycleActionToken"],
-                LifecycleActionResult="CONTINUE",
+                LifecycleActionResult=result,
+            )
+            self.logger.info(
+                f"Completed lifecycle action for ASG={asg_event.get('AutoScalingGroupName')} hook={asg_event.get('LifecycleHookName')} result={result}"
             )
         except ClientError as e:
             self.logger.error(
