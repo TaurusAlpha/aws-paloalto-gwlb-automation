@@ -20,6 +20,34 @@ class ConfigureLogger:
 
 
 class VMSeriesInterfaceScaling(ConfigureLogger):
+    def get_available_tagged_eni(self, instance_id: str, device_index: int) -> Optional[str]:
+        """
+        Look for an available (not attached) ENI created by this Lambda using tags.
+        This protects against Lambda crash between ENI creation and attachment.
+        """
+        try:
+            resp = self.ec2_client.describe_network_interfaces(
+                Filters=[
+                    {"Name": "tag:ManagedBy", "Values": ["vmseries-lambda"]},
+                    {"Name": "tag:InstanceId", "Values": [instance_id]},
+                    {"Name": "tag:DeviceIndex", "Values": [str(device_index)]},
+                    {"Name": "status", "Values": ["available"]},
+                ]
+            )
+            nis = resp.get("NetworkInterfaces", [])
+            if not nis:
+                return None
+
+            eni_id = nis[0].get("NetworkInterfaceId")
+            self.logger.info(
+                f"Reusing previously created available ENI {eni_id} for instance {instance_id} device-index={device_index}"
+            )
+            return eni_id
+        except ClientError as e:
+            self.logger.error(
+                f"Error searching for reusable ENI for instance {instance_id} device {device_index}: {e.response['Error'].get('Code')}"
+            )
+            return None
     def __init__(self) -> None:
         super().__init__()
 
@@ -247,14 +275,21 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             self.ensure_delete_on_termination(existing_eni_id, existing_attachment_id)
             return
 
-        # Create ENI and get its ID
-        interface_id = self.create_network_interface(
-            instance_id, interface["subnet"], interface["sg"], device_index=device_index
-        )
+        # Try to reuse previously created but unattached ENI (crash-safe idempotency)
+        interface_id = self.get_available_tagged_eni(instance_id, device_index)
+
+        # If none found, create new ENI
+        if not interface_id:
+            interface_id = self.create_network_interface(
+                instance_id,
+                interface["subnet"],
+                interface["sg"],
+                device_index=device_index,
+            )
 
         if not interface_id:
             self.logger.error(
-                f"Failed to create ENI for instance {instance_id} device-index={device_index}."
+                f"Failed to obtain ENI for instance {instance_id} device-index={device_index}."
             )
             return
 
