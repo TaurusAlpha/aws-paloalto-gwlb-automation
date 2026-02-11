@@ -1,1 +1,2 @@
 pan-os-python==1.11.0
+boto3

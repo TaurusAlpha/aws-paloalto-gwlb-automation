@@ -1,6 +1,7 @@
 import json
-from logging import getLogger, basicConfig, INFO, DEBUG
 import os
+from logging import getLogger, basicConfig, INFO, DEBUG
+from typing import Any, Optional
 from xml.etree import ElementTree as et
 from xml.etree.ElementTree import Element
 
@@ -11,14 +12,15 @@ from panos.panorama import Panorama
 
 
 class ConfigureLogger:
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.logger = getLogger(self.__class__.__name__)
         basicConfig(format="%(asctime)s %(message)s")
-        self.logger.setLevel(INFO if os.getenv("logger_level") else DEBUG)
+        level = os.getenv("logger_level", "INFO").upper()
+        self.logger.setLevel(DEBUG if level == "DEBUG" else INFO)
 
 
 class VMSeriesInterfaceScaling(ConfigureLogger):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
 
         # Prepare boto3 clients for required services
@@ -28,7 +30,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             "secretsmanager", region_name=os.environ["AWS_REGION"]
         )
 
-    def run(self, asg_event: dict) -> None:
+    def run(self, asg_event: dict[str, Any]) -> None:
         """
         Main function is used for handle correct lifecycle action (instance launch or instance terminate).
 
@@ -43,33 +45,35 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         )
 
         # Depending on event type, take appropriate actions
-        if (
-            event := asg_event["detail-type"]
-        ) == "EC2 Instance-launch Lifecycle Action":
+        event = asg_event.get("detail-type", "")
+        if event == "EC2 Instance-launch Lifecycle Action":
             self.logger.info("Run launch mode.")
-
-            # Disable source-destination check for first dataplane interface
-            self.disable_source_dest_check(network_interfaces[0]["NetworkInterfaceId"])
-
-            # Create network interfaces for management and second dataplane interface
-            self.setup_network_interfaces(instance_zone, subnet_id, instance_id)
-
+            try:
+                # Disable source-destination check for first dataplane interface
+                self.disable_source_dest_check(network_interfaces[0]["NetworkInterfaceId"])
+                # Create network interfaces for management and second dataplane interface
+                self.setup_network_interfaces(instance_zone, subnet_id, instance_id)
+            except Exception as e:
+                self.logger.error(f"Error during launch handling: {e}")
+                raise
         elif event == "EC2 Instance-terminate Lifecycle Action":
             self.logger.info("Run cleanup mode.")
-
-            if os.environ["fw_delicense"]:
-                # Delicense firewall using plugin sw_fw_license in Panorama (optional)
-                self.delicense_fw(instance_id)
-
+            try:
+                if os.environ.get("fw_delicense"):
+                    # Delicense firewall using plugin sw_fw_license in Panorama (optional)
+                    self.delicense_fw(instance_id)
+            except Exception as e:
+                self.logger.error(f"Error during terminate handling: {e}")
+                raise
         else:
-            raise Exception(f"Event type cannot be handled! {event}")
+            raise ValueError(f"Event type cannot be handled! {event}")
 
         # For each type of event (launch, terminate), lifecycle action needs to be completed
         self.complete_lifecycle(asg_event["detail"])
 
     def setup_network_interfaces(
         self, instance_zone: str, subnet_id: str, instance_id: str
-    ):
+    ) -> None:
         """
         Main logic here is to set necessary parameters and call
         functions to create Elastic Network Interfaces (ENI) with correct config and attach it to the instance.
@@ -92,7 +96,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         self.create_and_configure_new_network_interface(instance_id, interface)
 
     @staticmethod
-    def create_interface_settings(instance_zone: str) -> dict:
+    def create_interface_settings(instance_zone: str) -> dict[str, Any]:
         """
         This function normalize data with settings of each ENI.
 
@@ -110,7 +114,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             "sg": os.environ["sgr_id"],
         }
 
-    def inspect_ec2_instance(self, instance_id: str) -> tuple:
+    def inspect_ec2_instance(self, instance_id: str) -> tuple[Optional[str], Optional[str], Any]:
         """
         Helper class used for return EC2 Instance data: AZ, subnets, network interfaces
 
@@ -129,8 +133,8 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         )
 
     def create_network_interface(
-        self, instance_id: str, subnet_id: str, sg_id: int
-    ) -> str:
+        self, instance_id: str, subnet_id: str, sg_id: str
+    ) -> Optional[str]:
         """
         As function name, it creates new ENI, if something wrong it catch error.
 
@@ -151,16 +155,17 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 "NetworkInterfaceId"
             ]
             self.logger.info(f"Created network interface: {network_interface_id}")
-
+            return network_interface_id
         except ClientError as e:
             self.logger.error(
                 f"Error creating network interface: {e.response['Error']['Code']}"
             )
-
-        return network_interface_id
+        except Exception as e:
+            self.logger.error(f"Unexpected error creating network interface: {e}")
+        return None
 
     def create_and_configure_new_network_interface(
-        self, instance_id: str, interface: dict
+        self, instance_id: str, interface: dict[str, Any]
     ) -> None:
         """
         This function call create_network_interface for create new ENI and after that through att_network_interface
@@ -176,15 +181,19 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         )
 
         # If ENI ID was returned, attach ENI to instance
-        if interface_id:
+        if interface_id is not None:
             if interface["index"] != 0:
-                attachment_id = self.attach_network_interface(
-                    instance_id, interface_id, interface["index"]
-                )
-                self.modify_network_interface(interface_id, attachment_id)
+                try:
+                    attachment_id = self.attach_network_interface(
+                        instance_id, interface_id, interface["index"]
+                    )
+                    self.modify_network_interface(interface_id, attachment_id)
+                except Exception as e:
+                    self.logger.error(f"Error attaching or modifying ENI: {e}")
+                    self.delete_interface(interface_id)
 
     def attach_network_interface(
-        self, instance_id: str, interface_id: str, index
+        self, instance_id: str, interface_id: str, index: int
     ) -> str:
         """
         This function attach ENI to EC2 Instance.
@@ -216,14 +225,17 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 self.delete_interface(interface_id)
                 self.logger.error(
                     f"Error attaching network interface {interface_id}: {e.response['Error']['Code']}"
-                    f"Deleting interface."
+                    f" Deleting interface."
                 )
+            except Exception as e:
+                self.delete_interface(interface_id)
+                self.logger.error(f"Unexpected error attaching network interface {interface_id}: {e} Deleting interface.")
         else:
             self.logger.error(f"Missing values for either instance_id or interface_id!")
 
         return attachment_id
 
-    def disable_source_dest_check(self, interface_id: str):
+    def disable_source_dest_check(self, interface_id: str) -> None:
         """
         Network interfaces created by resource "aws_launch_template" by default have option
         source/destination check enabled, but for dataplane interfaces it has to be disabled.
@@ -241,7 +253,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             },
         )
 
-    def modify_network_interface(self, interface_id: str, attachment_id: str):
+    def modify_network_interface(self, interface_id: str, attachment_id: str) -> None:
         """
         This function modify ENI to be able to delete it on EC2 termination.
 
@@ -260,7 +272,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
             NetworkInterfaceId=interface_id,
         )
 
-    def delete_interface(self, interface_id: str):
+    def delete_interface(self, interface_id: str) -> None:
         """
         This function is used when there was some problem with ENI attachment to EC2 Instance.
         Purpose of it is not creating unused resources.
@@ -277,7 +289,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 f"Error deleting interface {interface_id}: {e.response['Error']['Code']}"
             )
 
-    def complete_lifecycle(self, asg_event: dict):
+    def complete_lifecycle(self, asg_event: dict[str, Any]) -> None:
         """
         If everything was completed, calling this function continue ASG lifecycle.
 
@@ -298,7 +310,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
                 f"Error completing life cycle hook for instance: {e.response['Error']['Code']}"
             )
 
-    def ip_network_interface(self, instance_id: str, device_index: str):
+    def ip_network_interface(self, instance_id: str, device_index: str) -> Optional[str]:
         """
         Function is getting IP address of untrust interface (with device index equal to 1).
         Internally function is using:
@@ -324,11 +336,12 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         self.logger.info(f"Found interface: {description}")
         try:
             return description["NetworkInterfaces"][0]["PrivateIpAddress"]
-        except IndexError as e:
+        except (IndexError, KeyError) as e:
+            self.logger.warning(f"Could not find private IP for instance {instance_id} device {device_index}: {e}")
             return None
 
     def panorama_cmd(
-        self, panorama, cmd: str, xml: bool = True, cmd_xml: bool = True
+        self, panorama: Panorama, cmd: str, xml: bool = True, cmd_xml: bool = True
     ) -> Element:
         """
         Helper function used for call command to Panorama.
@@ -343,7 +356,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         request = panorama.op(cmd=cmd, xml=xml, cmd_xml=cmd_xml)
         return et.fromstring(request)
 
-    def get_secret_config(self, secret_arn: str) -> dict:
+    def get_secret_config(self, secret_arn: str) -> dict[str, Any]:
         """
         Helper function to check config parameter in Secrets Manager
 
@@ -353,7 +366,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         secret_param_list = self.secret_client.get_secret_value(SecretId=secret_arn)
         return json.loads(secret_param_list["SecretString"])
 
-    def delicense_fw(self, instance_id) -> bool:
+    def delicense_fw(self, instance_id: str) -> bool:
         """
         Function used to de-license VM-Series using plugin sw_fw_license.
         In order to deactivate license used by VM-Series with specified IP address, below steps are done:
@@ -370,6 +383,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         vmseries_ip_address = self.ip_network_interface(instance_id, "1")
         # If IP address not found, quit
         if not vmseries_ip_address:
+            self.logger.warning(f"No management IP found for instance {instance_id}, skipping delicensing.")
             return False
 
         self.logger.debug(
@@ -379,7 +393,8 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         # Get setting required to connect to Panorama
         panorama_config_secret_arn = os.getenv("panorama_config")
         if not panorama_config_secret_arn:
-            raise Exception("Panorama config not found. Please check configuration")
+            self.logger.error("Panorama config not found. Please check configuration")
+            return False
         panorama_config = self.get_secret_config(panorama_config_secret_arn)
         panorama_username = panorama_config.get("username")
         panorama_password = panorama_config.get("password")
@@ -423,7 +438,7 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
         return delicensed
 
     def check_is_active_in_ha(
-        self, panorama_hostname, panorama_username, panorama_password
+        self, panorama_hostname: str, panorama_username: str, panorama_password: str
     ) -> bool:
         """
         Function used to check if provided Panorama hostname is active
@@ -463,19 +478,19 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
 
             # Return high-availability state
             return active
-        except:
+        except Exception as e:
             self.logger.info(
-                f"Error while checking high-availability state for Panorama {panorama_hostname}"
+                f"Error while checking high-availability state for Panorama {panorama_hostname}: {e}"
             )
             return False
 
     def request_panorama_delicense_fw(
         self,
-        vmseries_ip_address,
-        panorama_hostname,
-        panorama_username,
-        panorama_password,
-        panorama_lm_name,
+        vmseries_ip_address: str,
+        panorama_hostname: str,
+        panorama_username: str,
+        panorama_password: str,
+        panorama_lm_name: str,
     ) -> bool:
         """
         Function used to de-license VM-Series using plugin sw_fw_license running on Panorama server
@@ -544,12 +559,15 @@ class VMSeriesInterfaceScaling(ConfigureLogger):
 
             # Return final result of de-licensing
             return delicensed
-        except:
+        except Exception as e:
             self.logger.info(
-                f"Error while de-licensing VM-Series using Panorama {panorama_hostname}"
+                f"Error while de-licensing VM-Series using Panorama {panorama_hostname}: {e}"
             )
             return False
 
 
-def lambda_handler(asg_event: dict, context: dict):
+def lambda_handler(asg_event: dict[str, Any], context: dict[str, Any]) -> None:
+    """
+    AWS Lambda handler for VM-Series interface scaling and licensing automation.
+    """
     VMSeriesInterfaceScaling().run(asg_event=asg_event)
