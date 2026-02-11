@@ -61,16 +61,17 @@ resource "aws_iam_policy" "fw-iam-policy" {
         "ec2:DescribeNetworkInterfaces"
       ],
       "Resource": [
-          "*"
+        "arn:aws:ec2:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:instance/*",
+        "arn:aws:ec2:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:network-interface/*"
       ],
       "Effect": "Allow"
     },
     {
       "Action": [
-          "cloudwatch:PutMetricData"
+        "cloudwatch:PutMetricData"
       ],
       "Resource": [
-          "*"
+        "arn:aws:cloudwatch:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:*"
       ],
       "Effect": "Allow"
     },

@@ -28,9 +28,7 @@ variable "name_suffix" {
 variable "default_tag" {
   description = "Default tag to apply to all resources (i.e map-migrated)"
   type        = map(string)
-  default = {
-    key : ""
-  }
+  default     = {}
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -140,7 +138,7 @@ variable "bootstrap_config" {
   EOF
   type        = map(string)
   sensitive   = true
-  default     = null
+  default     = {}
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
