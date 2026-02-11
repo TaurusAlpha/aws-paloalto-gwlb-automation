@@ -50,27 +50,49 @@ resource "aws_iam_role_policy" "lambda_iam_policy_default" {
       "Resource": "${aws_cloudwatch_log_group.lambda_log_group.arn}:*"
     },
     {
+      "Sid": "EC2CreateAndAddressOps",
       "Action": [
+        "ec2:DescribeAddresses",
         "ec2:AllocateAddress",
         "ec2:AssociateAddress",
-        "ec2:AttachNetworkInterface",
         "ec2:CreateNetworkInterface",
-        "ec2:DescribeAddresses",
-        "ec2:DescribeInstances",
-        "ec2:DescribeNetworkInterfaces",
-        "ec2:DescribeSubnets",
-        "ec2:DeleteNetworkInterface",
-        "ec2:DetachNetworkInterface",
-        "ec2:DisassociateAddress",
-        "ec2:ModifyNetworkInterfaceAttribute",
         "ec2:ReleaseAddress",
-        "autoscaling:CompleteLifecycleAction",
-        "autoscaling:DescribeAutoScalingGroups"
+        "ec2:DisassociateAddress"
       ],
       "Effect": "Allow",
       "Resource": "*"
     },
     {
+      "Sid": "EC2ModifyAndDescribe",
+      "Action": [
+        "ec2:AttachNetworkInterface",
+        "ec2:DetachNetworkInterface",
+        "ec2:DeleteNetworkInterface",
+        "ec2:ModifyNetworkInterfaceAttribute",
+        "ec2:DescribeInstances",
+        "ec2:DescribeNetworkInterfaces",
+        "ec2:DescribeSubnets"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "arn:aws:ec2:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:instance/*",
+        "arn:aws:ec2:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:network-interface/*",
+        "arn:aws:ec2:${var.region}:${data.aws_caller_identity.pa_caller.account_id}:subnet/*"
+      ]
+    },
+    {
+      "Sid": "AutoScalingAccess",
+      "Action": [
+        "autoscaling:CompleteLifecycleAction",
+        "autoscaling:DescribeAutoScalingGroups"
+      ],
+      "Effect": "Allow",
+      "Resource": [
+        "${aws_autoscaling_group.fw_asg.arn}"
+      ]
+    },
+    {
+      "Sid": "KMSAccess",
       "Effect": "Allow",
       "Action": [
         "kms:GenerateDataKey*",
